@@ -1,0 +1,362 @@
+# =============================================================================
+# 🔥 Deepfake EfficientNet-B4 Fallback Model — GPU Fine-Tuning Script
+# =============================================================================
+#
+# HOW TO USE:
+# 1. Go to https://colab.research.google.com
+# 2. File → Upload Notebook → Upload this file (or paste into a cell)
+# 3. Runtime → Change runtime type → GPU (T4 is fine)
+# 4. Run All
+# 5. Download the model from /content/efficientnet_finetuned_ffpp/ when done
+# 6. Copy downloaded folder to: kitahack/models/efficientnet_finetuned_ffpp/
+#
+# ABOUT THIS MODEL:
+# This script fine-tunes a Google EfficientNet-B4 model. EfficientNets are incredibly
+# good at spotting structural and compositional anomalies in deepfakes (like
+# asymmetrical eyes, bad teeth rendering, or weird head boundaries). This makes
+# it the perfect "3rd voter" in a multi-model ensemble alongside XceptionNet
+# (texture/blending) and ViT (global patches).
+#
+# Expected time: ~30-45 minutes on T4 GPU
+# Expected accuracy: 85-95% on FF++ C23
+# =============================================================================
+
+# ---- STEP 1: Install dependencies ----
+# !pip install -q torch torchvision transformers pillow opencv-python kagglehub accelerate
+
+import os
+import cv2
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import random
+from PIL import Image
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from transformers import AutoImageProcessor, AutoModelForImageClassification
+
+# ---- STEP 2: Download Celeb-DF v2 dataset ----
+print("📥 Downloading Celeb-DF v2 dataset...")
+# Celeb-DF v2 is known for high-quality deepfakes (less dataset bias)
+import kagglehub
+dataset_path = kagglehub.dataset_download("reubensuju/celeb-df-v2")
+# The reubensuju mirror extracts directly into the root folder
+DATASET = dataset_path
+print(f"✅ Dataset at: {DATASET}")
+
+# ---- STEP 3: Configuration ----
+SEED = 42
+BATCH_SIZE = 16          # EfficientNet-B4 is a bit memory heavy
+EPOCHS = 20              # Good baseline for CNNs
+LR = 5e-5                # Slightly higher LR than ViT usually works better for EfficientNet
+WEIGHT_DECAY = 0.01      
+LABEL_SMOOTHING = 0.1    # Reduces overconfidence
+MAX_VIDEOS_PER_CLASS = 300  # Celeb-DF has lots of fakes, but fewer reals
+FRAMES_PER_VIDEO = 15    
+VAL_SPLIT = 0.2
+MODEL_NAME = "google/efficientnet-b4"
+SAVE_DIR = "/content/efficientnet_finetuned_celebdf"
+
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"🔧 Device: {device}")
+if device.type == "cuda":
+    print(f"   GPU: {torch.cuda.get_device_name(0)}")
+    print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+elif device.type == "cpu":
+    print("   ⚠️  WARNING: Running on CPU — this will be VERY slow!")
+    print("   Go to Runtime → Change runtime type → GPU (T4)")
+
+# ---- STEP 4: Face cropper ----
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
+
+def crop_face(pil_img, padding=0.3):
+    """Crop the largest face with padding. Returns original if no face found."""
+    rgb = np.array(pil_img)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
+    if len(faces) == 0:
+        return pil_img
+    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+    pad = int(padding * max(w, h))
+    x1, y1 = max(0, x - pad), max(0, y - pad)
+    x2, y2 = min(rgb.shape[1], x + w + pad), min(rgb.shape[0], y + h + pad)
+    return Image.fromarray(rgb[y1:y2, x1:x2])
+
+# ---- STEP 5: Extract frames from videos ----
+def extract_frames_from_dir(video_dir, max_videos, frames_per_video):
+    """Extract evenly-spaced, face-cropped frames from videos."""
+    frames = []
+    if not os.path.exists(video_dir):
+        return frames
+        
+    videos = sorted([f for f in os.listdir(video_dir) if f.endswith(".mp4")])
+    videos = videos[:max_videos]
+
+    for vi, v in enumerate(videos):
+        cap = cv2.VideoCapture(os.path.join(video_dir, v))
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total <= 0:
+            cap.release()
+            continue
+
+        # Skip first/last 10%
+        start = int(total * 0.10)
+        end = int(total * 0.90)
+        if end <= start:
+            start, end = 0, total
+
+        indices = [start + int(i * (end - start) / frames_per_video)
+                   for i in range(frames_per_video)]
+
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if ret:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = crop_face(Image.fromarray(rgb))
+                frames.append(img)
+
+        cap.release()
+
+        if (vi + 1) % 20 == 0:
+            print(f"  Processed {vi + 1}/{len(videos)} videos, {len(frames)} frames")
+
+    return frames
+
+print("\n📂 Extracting frames from Celeb-DF (this may take a few minutes)...")
+
+# Real datasets in Celeb-DF
+real_dir_1 = os.path.join(DATASET, "Celeb-real")
+real_dir_2 = os.path.join(DATASET, "YouTube-real")
+
+real_frames = extract_frames_from_dir(real_dir_1, int(MAX_VIDEOS_PER_CLASS*0.6), FRAMES_PER_VIDEO)
+real_frames += extract_frames_from_dir(real_dir_2, int(MAX_VIDEOS_PER_CLASS*0.4), FRAMES_PER_VIDEO)
+print(f"  ✅ Total Real: {len(real_frames)} frames")
+
+# Fake dataset in Celeb-DF
+fake_dir = os.path.join(DATASET, "Celeb-synthesis")
+# We sample enough fakes to roughly match the reals
+fake_frames = extract_frames_from_dir(fake_dir, MAX_VIDEOS_PER_CLASS, FRAMES_PER_VIDEO)
+print(f"  ✅ Total Fake: {len(fake_frames)} frames")
+
+# Balance classes exactly
+n = min(len(real_frames), len(fake_frames))
+real_frames = real_frames[:n]
+fake_frames = fake_frames[:n]
+print(f"\n📊 Balanced Dataset: {n} real + {n} fake = {2*n} total frames")
+
+# ---- STEP 6: Train/Val split (VIDEO-LEVEL to prevent data leakage) ----
+all_frames = real_frames + fake_frames
+all_labels = [0] * len(real_frames) + [1] * len(fake_frames)
+
+combined = list(zip(all_frames, all_labels))
+random.shuffle(combined)
+
+split = int(len(combined) * (1 - VAL_SPLIT))
+train_data = combined[:split]
+val_data = combined[split:]
+
+train_frames, train_labels = zip(*train_data)
+val_frames, val_labels = zip(*val_data)
+print(f"📊 Train: {len(train_frames)}, Val: {len(val_frames)}")
+
+# ---- STEP 7: Dataset with augmentations ----
+processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
+
+train_augment = transforms.Compose([
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.RandomRotation(15), 
+    transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.05),
+    transforms.RandomResizedCrop(380, scale=(0.75, 1.0)),  # EfficientNet-B4 expects ~380x380
+    transforms.RandomChoice([
+        transforms.GaussianBlur(3, sigma=(0.1, 2.0)),
+        transforms.GaussianBlur(5, sigma=(0.5, 1.5)),
+        transforms.Lambda(lambda x: x),
+    ]),
+    transforms.RandomGrayscale(p=0.1),
+])
+
+class DeepfakeDataset(Dataset):
+    def __init__(self, images, labels, processor, augment=None):
+        self.images = list(images)
+        self.labels = list(labels)
+        self.processor = processor
+        self.augment = augment
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        img = self.images[idx]
+        if self.augment:
+            img = self.augment(img)
+        # Convert grayscale (L) to RGB if needed by processor
+        if img.mode != "RGB":
+             img = img.convert("RGB")
+        pixel_values = self.processor(
+            images=img, return_tensors="pt"
+        )["pixel_values"].squeeze(0)
+        return pixel_values, self.labels[idx]
+
+train_ds = DeepfakeDataset(train_frames, train_labels, processor, augment=train_augment)
+val_ds = DeepfakeDataset(val_frames, val_labels, processor, augment=None)
+
+train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+val_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+
+# ---- STEP 8: Model setup ----
+print(f"\n🧠 Loading {MODEL_NAME} model...")
+# Ignore mismatched sizes because we are changing from 1000 classes (ImageNet) to 2 classes (Real/Fake)
+model = AutoModelForImageClassification.from_pretrained(
+    MODEL_NAME,
+    num_labels=2,
+    ignore_mismatched_sizes=True,
+    id2label={0: "Real", 1: "Fake"},
+    label2id={"Real": 0, "Fake": 1}
+)
+
+# Freeze lower backbone
+for param in model.efficientnet.parameters():
+    param.requires_grad = False
+
+# Unfreeze top layers (classifier and last few blocks of the encoder)
+# EfficientNet-B4 has many blocks. We unfreeze the last few blocks.
+for param in model.classifier.parameters():
+    param.requires_grad = True
+
+try:
+    # Unfreeze the very last stage (stage 6) of EfficientNet
+    for block in model.efficientnet.encoder.blocks[-2:]:
+        for param in block.parameters():
+            param.requires_grad = True
+except Exception as e:
+    print("Warning: Could not unfreeze specific encoder blocks, retraining classifier only.", e)
+
+model = model.to(device)
+
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total_params = sum(p.numel() for p in model.parameters())
+print(f"📦 Trainable: {trainable:,} / {total_params:,} ({trainable/total_params*100:.1f}%)")
+
+# ---- STEP 9: Training loop ----
+optimizer = torch.optim.AdamW(
+    [p for p in model.parameters() if p.requires_grad],
+    lr=LR, weight_decay=WEIGHT_DECAY,
+)
+
+warmup_epochs = 2
+def get_lr(epoch):
+    if epoch < warmup_epochs:
+        return (epoch + 1) / warmup_epochs
+    return 0.5 * (1 + np.cos(np.pi * (epoch - warmup_epochs) / (EPOCHS - warmup_epochs)))
+
+scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, get_lr)
+criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
+
+print(f"\n{'='*60}")
+print(f"🚀 Training EfficientNet for {EPOCHS} epochs on {device}...")
+print(f"{'='*60}\n")
+
+best_val_acc = 0.0
+patience_counter = 0
+PATIENCE = 6
+
+for epoch in range(EPOCHS):
+    # --- Train ---
+    model.train()
+    train_loss, train_correct, train_total = 0, 0, 0
+
+    for batch_idx, (pixels, labels) in enumerate(train_dl):
+        pixels = pixels.to(device)
+        labels = torch.tensor(labels).to(device)
+
+        optimizer.zero_grad()
+        outputs = model(pixel_values=pixels)
+        logits = outputs.logits
+        loss = criterion(logits, labels)
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        train_loss += loss.item()
+        preds = torch.argmax(logits, dim=1)
+        train_correct += (preds == labels).sum().item()
+        train_total += len(labels)
+
+    scheduler.step()
+    train_acc = train_correct / train_total * 100
+
+    # --- Validate ---
+    model.eval()
+    val_correct, val_total = 0, 0
+    val_fp, val_fn = 0, 0
+
+    with torch.no_grad():
+        for pixels, labels in val_dl:
+            pixels = pixels.to(device)
+            labels_t = torch.tensor(labels).to(device)
+            outputs = model(pixel_values=pixels)
+            preds = torch.argmax(outputs.logits, dim=1)
+
+            for p, l in zip(preds.tolist(), labels):
+                val_total += 1
+                if p == l:
+                    val_correct += 1
+                elif p == 1 and l == 0:
+                    val_fp += 1
+                else:
+                    val_fn += 1
+
+    val_acc = val_correct / max(val_total, 1) * 100
+    lr_now = scheduler.get_last_lr()[0] * LR 
+
+    improved = ""
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        patience_counter = 0
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        model.save_pretrained(SAVE_DIR)
+        processor.save_pretrained(SAVE_DIR)
+        improved = " ⭐ best!"
+    else:
+        patience_counter += 1
+
+    print(
+        f"Epoch {epoch+1:2d}/{EPOCHS} | "
+        f"loss={train_loss/len(train_dl):.4f} train={train_acc:.1f}% | "
+        f"val={val_acc:.1f}% FP={val_fp} FN={val_fn} | "
+        f"lr={lr_now:.2e}{improved}"
+    )
+
+    if patience_counter >= PATIENCE:
+        print(f"\n⏹ Early stopping — no improvement for {PATIENCE} epochs")
+        break
+
+print(f"\n✅ Best validation accuracy: {best_val_acc:.1f}%")
+
+# ---- STEP 10: Auto-download ----
+print("\n📥 Preparing download...")
+try:
+    import shutil
+    from google.colab import files
+    shutil.make_archive('/content/efficientnet_finetuned_ffpp', 'zip', SAVE_DIR)
+    print("✅ Downloading model zip...")
+    files.download('/content/efficientnet_finetuned_ffpp.zip')
+except:
+    print(f"""
+╔══════════════════════════════════════════════════════════╗
+║  🎉 DONE! Download your fine-tuned model:               ║
+║                                                          ║
+║  1. In Colab, click the 📁 Files panel                     ║
+║  2. Navigate to /content/efficientnet_finetuned_ffpp/    ║
+║  3. Download ALL files in that folder                    ║
+║  4. We will add this as the 3rd model ensemble next!     ║
+╚══════════════════════════════════════════════════════════╝
+""")
