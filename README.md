@@ -81,7 +81,7 @@ If you are cloning this repository, follow these steps to run the project locall
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/user/vhack.git  # Replace with actual URL
+git clone https://github.com/TisuPaper/vhack.git 
 cd vhack
 ```
 
