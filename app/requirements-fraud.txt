@@ -1,0 +1,9 @@
+# FastAPI file upload (required for /predict, /predict-audio, etc.)
+python-multipart
+
+# Fraud pipeline: Whisper (STT) + Gemini (LLM)
+openai-whisper
+google-generativeai
+
+# Visual models (model_loader.py)
+timm
