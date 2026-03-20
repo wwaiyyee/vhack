@@ -10,6 +10,7 @@ A privacy-preserving, multi-modal deepfake detection system run at Trusted Execu
 2. [Solution & Features](#2-solution--features)
 3. [Architecture](#3-architecture)
 4. [Tech Stack](#4-tech-stack)
+- [Getting Started / Installation](#getting-started--installation)
 5. [System Overview](#5-system-overview)
 6. [Visual Deepfake Detection (Image & Video)](#6-visual-deepfake-detection-image--video)
 7. [Audio Deepfake Detection](#7-audio-deepfake-detection)
@@ -66,6 +67,51 @@ The client (Flutter app on mobile or web) sends media to a FastAPI backend runni
 | **Audio deepfake** | PyTorch — CNN-LSTM, TCN, TCN-LSTM; 16 kHz mono; soundfile / PyAV for decoding |
 | **Fraud pipeline** | Whisper (local STT), custom PII filter (typed redaction), rule engine (bilingual EN/MY), playbook matcher (token overlap), Google Gemini (LLM) |
 | **Deployment** | Backend on confidential VM  (TEE)|
+
+---
+
+## Getting Started / Installation
+
+If you are cloning this repository, follow these steps to run the project locally.
+
+### Prerequisites
+- Python 3.10+
+- Flutter SDK
+- (Optional) `.env` file with `GEMINI_API_KEY` for the call fraud pipeline.
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/user/vhack.git  # Replace with actual URL
+cd vhack
+```
+
+### 2. Backend Setup (FastAPI)
+```bash
+# Create and activate a virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
+# Install dependencies (ensure PyTorch is also installed based on your system)
+cd app
+pip install -r requirements-fraud.txt
+pip install fastapi uvicorn python-multipart torch torchvision torchaudio timm opencv-python Pillow
+
+# Run the backend server
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+*The backend will be available at `http://localhost:8000` and the API docs at `http://localhost:8000/docs`.*
+
+### 3. Frontend Setup (Flutter)
+```bash
+# Open a new terminal
+cd frontend
+
+# Install Flutter dependencies
+flutter pub get
+
+# Run the flutter app (e.g., in Chrome for testing)
+flutter run -d chrome
+```
 
 ---
 
