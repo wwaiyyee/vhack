@@ -728,7 +728,10 @@ from app.audio_inference import predict_ensemble
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".ogg", ".flac", ".m4a", ".webm", ".aac"}
 
 
-_AUDIO_MODEL_NAMES = {"cnn-lstm": "CNN-LSTM", "tcn": "TCN", "tcn-lstm": "TCN-LSTM"}
+_AUDIO_MODEL_NAMES = {
+    "xlsr":     "XLS-R Deepfake (ASVspoof2019)",
+    "wav2vec2": "Wav2Vec2 Deepfake",
+}
 
 
 @app.post("/predict-audio")
@@ -771,7 +774,7 @@ async def predict_audio(file: UploadFile = File(...)):
             os.unlink(tmp_path)
 
     # ── Build structured response ──────────────────────────────────────────
-    avg_p_fake   = 1.0-raw["probabilities"]["fake"]
+    avg_p_fake   = raw["probabilities"]["fake"]   # HF models output correctly-oriented probs
     verdict, uncertain = _verdict(avg_p_fake, True)
     confidence_band    = _confidence_band(avg_p_fake)
 

@@ -1,4 +1,7 @@
 # ./app/audio_detection/models.py
+# NOTE: These custom model classes (CNN_LSTM, TCN, TCN_LSTM) are DEPRECATED.
+# The audio detection pipeline now uses HuggingFace pretrained models via
+# app/audio_model_loader.py.  These classes are retained for historical reference.
 
 import torch
 import torch.nn as nn
