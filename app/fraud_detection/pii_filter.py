@@ -8,6 +8,7 @@ Overlapping spans are merged so no double-replacement occurs.
 import os
 import re
 from pathlib import Path
+from typing import Optional
 
 # Each entry: (regex_pattern, placeholder_label)
 _TYPED_PII_PATTERNS: list[tuple[str, str]] = [
@@ -77,7 +78,7 @@ def _merge_spans(spans: list[tuple[int, int, str]]) -> list[tuple[int, int, str]
     return merged
 
 
-def filter_pii(text: str, patterns: list[tuple[str, str]] | None = None) -> tuple[str, list[dict]]:
+def filter_pii(text: str, patterns: Optional[list[tuple[str, str]]] = None) -> tuple[str, list[dict]]:
     """
     Redact PII using typed placeholders. Returns (filtered_text, redacted_list).
     redacted_list: [{"original": "...", "label": "PHONE"}, ...]
