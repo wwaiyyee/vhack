@@ -373,10 +373,6 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
           <option value="10000">10s</option>
         </select>
       </div>
-      <label style="font-size:12px; color:rgba(255,255,255,0.8); display:flex; align-items:center; cursor:pointer; background:rgba(255,255,255,0.05); padding:4px 10px; border-radius:6px; border: 1px solid rgba(255,255,255,0.1);" title="Allow storing scans to retrain models">
-        <input type="checkbox" id="allowDataStorage" checked style="margin-right:6px; cursor:pointer;">
-        <span>Allow Storage (<a href="#" style="color:#818CF8; text-decoration:none; font-weight:600;">T&C</a>)</span>
-      </label>
       <button id="btnPip" class="glass-btn btn-pip" onclick="toggleWidget()" title="Float results in a mini window">
         ⧉ Pop Out
       </button>

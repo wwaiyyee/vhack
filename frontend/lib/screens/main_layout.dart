@@ -129,6 +129,28 @@ class _MainLayoutState extends State<MainLayout> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  // Privacy Settings Button (Light grey circle)
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: () => _showPrivacyDialog(context),
+                        child: const Icon(
+                          Icons.shield_outlined,
+                          size: 20,
+                          color: Colors.black54,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   // Settings Button (Light grey circle)
                   Container(
                     width: 36,
@@ -225,6 +247,87 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showPrivacyDialog(BuildContext context) {
+    bool localConsent = true;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.shield_outlined, color: Colors.blueAccent),
+                  SizedBox(width: 10),
+                  Text('Data Storage & Privacy', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                   const Text(
+                    'To improve our models, we collect anonymized scan data. You can opt out at any time.',
+                    style: TextStyle(fontSize: 13, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.02),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.black.withValues(alpha: 0.05))
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: Checkbox(
+                            value: localConsent,
+                            onChanged: (val) => setState(() => localConsent = val ?? false),
+                            activeColor: Colors.blueAccent,
+                            checkColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: RichText(
+                              text: const TextSpan(
+                                style: TextStyle(fontSize: 13, color: Colors.black87, height: 1.4),
+                                children: [
+                                  TextSpan(text: 'I allow my scan data to be securely stored to retrain detection models. Read our '),
+                                  TextSpan(text: 'Terms & Conditions', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                                  TextSpan(text: ' for full details.'),
+                                ]
+                              )
+                            )
+                          )
+                        )
+                      ]
+                    ),
+                  )
+                ]
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Save Preferences', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                )
+              ],
+            );
+          }
+        );
+      }
     );
   }
 }

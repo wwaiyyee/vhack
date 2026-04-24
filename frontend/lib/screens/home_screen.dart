@@ -507,40 +507,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         : Column(
                             children: [
                               const SizedBox(height: 16),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  SizedBox(
-                                    height: 24,
-                                    width: 24,
-                                    child: Checkbox(
-                                      value: _allowDataStorage,
-                                      onChanged: (val) {
-                                        setState(() => _allowDataStorage = val ?? false);
-                                      },
-                                      activeColor: Colors.black87,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(top: 3),
-                                      child: RichText(
-                                        text: const TextSpan(
-                                          style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
-                                          children: [
-                                            TextSpan(text: 'I allow my scan to be securely stored to improve detection models. Read our '),
-                                            TextSpan(text: 'Terms & Conditions', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
-                                            TextSpan(text: ' for details.'),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(

@@ -15,9 +15,10 @@ A privacy-preserving, multi-modal deepfake detection system run at Trusted Execu
 6. [Visual Deepfake Detection (Image & Video)](#6-visual-deepfake-detection-image--video)
 7. [Audio Deepfake Detection](#7-audio-deepfake-detection)
 8. [Call Fraud Detection (Advanced)](#8-call-fraud-detection-advanced)
-9. [API Reference](#9-api-reference)
-10. [Challenges Faced](#10-challenges-faced)
-11. [Future Roadmap](#11-future-roadmap)
+9. [Model Retraining Pipeline](#9-model-retraining-pipeline)
+10. [API Reference](#10-api-reference)
+11. [Challenges Faced](#11-challenges-faced)
+12. [Future Roadmap](#12-future-roadmap)
 
 ---
 
@@ -36,7 +37,7 @@ Realytic is a **multi-modal deepfake and call-fraud detection system** that runs
 **Highlights:**
 
 - **Image & video deepfake** — Ensemble of Xception, ViT, and EfficientNet-B4 with a tiebreaker for uncertain cases; confidence bands (HIGH/MEDIUM/LOW) and per-model signals; face crop and frame sampling for video.
-- **Audio deepfake** — Three models (CNN-LSTM, TCN, TCN-LSTM) with chunk-level majority vote; supports common formats (WAV, MP3, WebM, etc.).
+- **Audio deepfake** — Two models (XLS-R, Wav2Vec2) with chunk-level majority vote; supports common formats (WAV, MP3, WebM, etc.).
 - **Call fraud pipeline** — Speech-to-text (Whisper) → typed PII redaction → rule engine + playbook matching + Gemini; hybrid risk score (rules + playbook + LLM) and merged evidence; scam type and recommendation.
 - **Live capture (web)** — Share screen or tab; real-time face and audio analysis。
 - **Privacy-first** — PII is redacted before any LLM call; backend can run on a confidential VM (TEE); no storage of uploaded media by default.
@@ -49,10 +50,10 @@ Realytic is a **multi-modal deepfake and call-fraud detection system** that runs
 The client (Flutter app on mobile or web) sends media to a FastAPI backend running inside a **Trusted Execution Environment (TEE)**. The backend routes by media type, runs ensemble deepfake models and (for audio) a fraud pipeline, then returns scores and evidence.
 
 
-![Kitahack 2026 (1)](https://github.com/user-attachments/assets/bf1f36cf-e4f4-41ce-8a53-35c4c981e53f)
+![Vhack 2026](image/Vhack%202026.jpg)
 
 - **Client:** Flutter (iOS, Android, Web). Uploads images/videos/audio or streams live capture; displays verdicts, confidence, and fraud risk (e.g. risk level, scam type, evidence).
-- **TEE / Backend:** FastAPI. **Image** → face crop (OpenCV) → visual deepfake ensemble (Xception + ViT, with EfficientNet tiebreaker when uncertain). **Video** → frame extraction → same visual pipeline. **Audio** → deepfake ensemble (CNN-LSTM, TCN, TCN-LSTM) and, in parallel, **fraud pipeline**: Speech-to-Text → PII redaction → Rule engine + Playbook matching + Gemini → hybrid risk score and evidence.
+- **TEE / Backend:** FastAPI. **Image** → face crop (OpenCV) → visual deepfake ensemble (Xception + ViT, with EfficientNet tiebreaker when uncertain). **Video** → frame extraction → same visual pipeline. **Audio** → deepfake ensemble (XLS-R, Wav2Vec2) and, in parallel, **fraud pipeline**: Speech-to-Text → PII redaction → Rule engine + Playbook matching + Gemini → hybrid risk score and evidence.
 - **Outputs:** Deepfake verdict + confidence band; fraud risk level, scam type, and merged evidence from rules, playbooks, and Gemini.
 
 ---
@@ -64,7 +65,7 @@ The client (Flutter app on mobile or web) sends media to a FastAPI backend runni
 | **Frontend** | Flutter (Dart) — mobile (iOS/Android) and web|
 | **Backend** | FastAPI (Python 3.x), Uvicorn |
 | **Visual deepfake** | OpenCV (face detection/crop), PyTorch — FaceForge (Xception), ViT (Vision Transformer), EfficientNet-B4 (tiebreaker) |
-| **Audio deepfake** | PyTorch — CNN-LSTM, TCN, TCN-LSTM; 16 kHz mono; soundfile / PyAV for decoding |
+| **Audio deepfake** | PyTorch — Wav2Vec2, XLS-R; 16 kHz mono; soundfile / PyAV for decoding |
 | **Fraud pipeline** | Whisper (local STT), custom PII filter (typed redaction), rule engine (bilingual EN/MY), playbook matcher (token overlap), Google Gemini (LLM) |
 | **Deployment** | Backend on confidential VM  (TEE)|
 Web link: https://realitic-app.web.app Can test the backend api via: http://35.198.241.242:8000/docs
@@ -400,7 +401,20 @@ final_risk_score = 0.35 × rule_score
 
 ---
 
-## 9. API Reference
+## 9. Model Retraining Pipeline
+
+Realytic includes an end-to-end admin dashboard and backend pipeline designed to continuously retrain its deepfake detection models based on newly vetted user data.
+
+- **Data Retention & Ground Truth Labeling**: Submitted media that users opt-in to save is persisted securely in local storage. Admins can manually audit these "uncertain" samples and label them as `True` (Real) or `False` (Fake).
+- **Model Architecture Selection**: The platform allows admins to specify the exact challenger models (e.g., FaceForge XceptionNet, Fine-tuned ViT, XLS-R) to retrain.
+- **Controlled Three-Stage Delivery**: The pipeline follows a strict simulation workflow:
+  1. **Retraining**: Automates data augmentation, multi-epoch training, and validation holdouts.
+  2. **Evaluation**: Compares the newly minted "Challenger" model against the current "Champion" model using key metrics (Accuracy, F1-Score, Processing Time).
+  3. **Deployment**: Once approved, the new model weights are hot-swapped into the running FastAPI application without requiring downtime, ensuring Realytic adapts dynamically to zero-day deepfakes.
+
+---
+
+## 10. API Reference
 
 ### `POST /predict` — Image deepfake
 
@@ -482,7 +496,7 @@ See [Section 8](#8-call-fraud-detection-advanced) for full response schema.
 
 ---
 
-## 10. Challenges Faced
+## 11. Challenges Faced
 
 - **Uncertain band in visual detection** — Champion + Challenger often output mid-range scores (0.35–0.65) on certain fakes (e.g. Celeb-DF). **Approach:** A third model (EfficientNet-B4, trained on Celeb-DF) is invoked only when the primary ensemble is uncertain, acting as a tiebreaker and significantly improving accuracy on those cases.
 - **Video quality and face visibility** — Low resolution, blur, or few visible faces lead to inconsistent per-frame scores and "UNCERTAIN" verdicts. **Approach:** Video-level aggregation (e.g. mean score), clear confidence bands, and in-app tips (e.g. "Try better lighting or a closer face") so users understand why the result is uncertain.
@@ -491,7 +505,7 @@ See [Section 8](#8-call-fraud-detection-advanced) for full response schema.
 
 ---
 
-## 11. Future Roadmap
+## 12. Future Roadmap
 
 - **Models & data** — Add or swap visual/audio models; fine-tune on more diverse deepfake datasets (e.g. additional face-forgery and voice-clone corpora).
 - **Detection coverage & precision** — **Image/video/audio:** detect more deepfake types (e.g. more forgery methods and generators) and improve precision so real vs fake is more accurate, including on edge cases (low quality, compression, partial faces). **Fraud:** detect more scam types and patterns (e.g. new playbooks, regional variants); improve precision to reduce false positives and missed scams.

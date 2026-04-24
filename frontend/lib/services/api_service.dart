@@ -1,11 +1,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 class ApiService {
-  // Change this when deploying to VM
-  static String baseUrl = 'http://localhost:8000';
+  // Change the production URL to your VM's public IP
+  static String get baseUrl => kDebugMode 
+    ? 'http://localhost:8000' 
+    : 'http://35.198.241.242:8000'; 
 
   /// Get MIME type from filename extension
   static String _getMimeType(String filename) {
