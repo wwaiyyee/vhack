@@ -3,6 +3,7 @@ import 'home_screen.dart'; // The current Scanner tab
 import 'live_screen.dart'; // The Live Capture tab
 import '../widgets/glass_bottom_nav.dart';
 import '../widgets/background.dart';
+import 'admin/admin_dashboard_screen.dart' as admin;
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
@@ -141,7 +142,9 @@ class _MainLayoutState extends State<MainLayout> {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(18),
                         onTap: () {
-                          // TODO: Implement settings action
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const admin.AdminDashboardScreen()),
+                          );
                         },
                         child: const Icon(
                           Icons.settings_outlined,

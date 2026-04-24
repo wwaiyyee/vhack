@@ -27,6 +27,23 @@ import torch
 import cv2
 import numpy as np
 
+RETAINED_DIR = Path(__file__).resolve().parent / "retained_samples"
+RETAINED_DIR.mkdir(parents=True, exist_ok=True)
+
+def _save_retained_sample(content: bytes, filename: str):
+    """Save user uploads into the retained_samples folder for the retraining pipeline."""
+    ext = ""
+    if filename:
+        ext = os.path.splitext(filename)[1].lower()
+    if not ext:
+        ext = ".dat"
+    
+    file_id = f"SAM_{int(time.time())}_{uuid.uuid4().hex[:6]}{ext}"
+    target = RETAINED_DIR / file_id
+    try:
+        target.write_bytes(content)
+    except Exception as e:
+        print(f"Failed to retain sample: {e}")
 
 app = FastAPI(title="Realitic API")
 
@@ -384,6 +401,8 @@ async def predict(file: UploadFile = File(...)):
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Empty file uploaded.")
 
+    _save_retained_sample(image_bytes, file.filename)
+
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     except Exception:
@@ -595,6 +614,8 @@ async def predict_video(file: UploadFile = File(...)):
     if not video_bytes:
         raise HTTPException(status_code=400, detail="Empty file uploaded.")
 
+    _save_retained_sample(video_bytes, file.filename)
+
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp.write(video_bytes)
         tmp_path = tmp.name
@@ -761,6 +782,7 @@ async def predict_audio(file: UploadFile = File(...)):
     suffix = ext or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         content = await file.read()
+        _save_retained_sample(content, file.filename)
         tmp.write(content)
         tmp_path = tmp.name
 
@@ -865,6 +887,7 @@ async def analyze_fraud(file: UploadFile = File(...)):
     suffix = ext or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         content = await file.read()
+        _save_retained_sample(content, file.filename)
         tmp.write(content)
         tmp_path = tmp.name
 
