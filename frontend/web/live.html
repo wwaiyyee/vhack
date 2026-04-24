@@ -776,7 +776,7 @@
           stream = await navigator.mediaDevices.getDisplayMedia({
             video: { cursor: 'always' },
             audio: {
-              suppressLocalAudioPlayback: true,
+              suppressLocalAudioPlayback: false,
             },
             systemAudio: 'include',
           });
@@ -806,6 +806,7 @@
 
         if (screenAudioTracks.length > 0) {
           audioSourceStream = stream;
+
           document.getElementById('audioStatus').innerHTML = `
             <div class="audio-indicator">
               <div class="audio-bars">
@@ -888,6 +889,7 @@
       lastFraudHtml = null;
       lastFraudUpdateTime = null;
       audioAnalyzedOnce = false;
+
 
       if (audioContext) {
         audioContext.close();

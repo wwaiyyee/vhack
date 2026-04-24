@@ -5,7 +5,7 @@ import 'package:http_parser/http_parser.dart';
 
 class ApiService {
   // Change this when deploying to VM
-  static String baseUrl = 'http://35.198.241.242:8000';
+  static String baseUrl = 'http://localhost:8000';
 
   /// Get MIME type from filename extension
   static String _getMimeType(String filename) {

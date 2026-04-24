@@ -596,7 +596,7 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
         try {
           stream = await navigator.mediaDevices.getDisplayMedia({
             video: { cursor: 'always' },
-            audio: { suppressLocalAudioPlayback: true },
+            audio: { suppressLocalAudioPlayback: false },
             systemAudio: 'include'
           });
         } catch (optErr) {
@@ -695,6 +695,7 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
       lastFraudHtml = null;
       lastFraudUpdateTime = null;
       audioAnalyzedOnce = false;
+
 
       if (audioContext) {
         audioContext.close();
@@ -918,8 +919,7 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
     }
 
     async function analyzeAudio() {
-      if (audioAnalyzedOnce) return;
-      if (isAnalyzingAudio || audioAnalysisBuffer.length < 3 || !stream) return;
+      if (isAnalyzingAudio || audioAnalysisBuffer.length < 2 || !stream) return;
       isAnalyzingAudio = true;
 
       try {
@@ -931,6 +931,23 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
 
         const fd = new FormData();
         fd.append('file', blob, 'live_audio.webm');
+
+        // Fire fraud analysis in parallel (non-blocking) so it doesn't delay audio results
+        const now = Date.now();
+        if (now - lastFraudAnalysisTime > 15000) {
+          lastFraudAnalysisTime = now;
+          const fdFraud = new FormData();
+          fdFraud.append('file', blob, 'live_audio.webm');
+          fetch(API_BASE + '/analyze-fraud', { method: 'POST', body: fdFraud })
+            .then(r => r.ok ? r.json() : null)
+            .then(fraudResult => {
+              if (fraudResult) updateAudioDisplay(null, fraudResult);
+            })
+            .catch(e => {
+              console.warn('Fraud analysis failed:', e);
+              lastFraudAnalysisTime = 0;
+            });
+        }
 
         const resp = await fetch(API_BASE + '/predict-audio', { method: 'POST', body: fd });
         if (!resp.ok) {
@@ -944,22 +961,7 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
 
         const result = await resp.json();
 
-        let fraudResult = null;
-        try {
-          const now = Date.now();
-          if (now - lastFraudAnalysisTime > 15000) {
-            lastFraudAnalysisTime = now;
-            const fdFraud = new FormData();
-            fdFraud.append('file', blob, 'live_audio.webm');
-            const fraudResp = await fetch(API_BASE + '/analyze-fraud', { method: 'POST', body: fdFraud });
-            if (fraudResp.ok) fraudResult = await fraudResp.json();
-          }
-        } catch (e) {
-          console.warn('Fraud analysis failed:', e);
-          lastFraudAnalysisTime = 0;
-        }
-
-        updateAudioDisplay(result, fraudResult);
+        updateAudioDisplay(result, null);
         updateWidgetAudio(result);
 
         const v    = result.verdict || 'UNCERTAIN';
@@ -967,8 +969,6 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
         const bandLabel2 = BAND_LABELS[result.confidence_band] || '';
         const time = new Date().toLocaleTimeString();
         addLog(vl2, '🎙 ' + time + ' — Audio ' + v + ' &middot; ' + bandLabel2);
-
-        audioAnalyzedOnce = true;
       } catch (err) {
         console.error('Audio analysis error:', err);
         _showAudioError(err.message || 'Unknown error');
@@ -980,12 +980,19 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
     function updateAudioDisplay(result, fraudResult) {
       const statusEl = document.getElementById('audioStatus');
       if (!statusEl) return;
-      renderVerdictCard(statusEl, result, 'audio');
+      if (result) renderVerdictCard(statusEl, result, 'audio');
       const now = Date.now();
       const shouldUpdateFraud = fraudResult && (!lastFraudUpdateTime || (now - lastFraudUpdateTime >= FRAUD_DISPLAY_MS));
       if (shouldUpdateFraud) {
         lastFraudHtml = getFraudBlockHtml(fraudResult);
         lastFraudUpdateTime = now;
+        // Log fraud result
+        const rl = fraudResult.risk_level || 'low';
+        const rs = fraudResult.risk_score || 0;
+        const st = fraudResult.scam_type || 'none';
+        const logClass = rl === 'high' ? 'fake' : rl === 'medium' ? 'uncertain' : 'real';
+        const time = new Date().toLocaleTimeString();
+        addLog(logClass, '🔍 ' + time + ' — Fraud: ' + rl.toUpperCase() + ' (score ' + rs + ') · ' + st);
       }
       if (lastFraudHtml) {
         const div = document.createElement('div');
@@ -1009,12 +1016,12 @@ const String _liveHtmlTemplate = r'''<!DOCTYPE html>
       const recommendation = (fraud.recommendation) ? esc(fraud.recommendation) : ((fraud.signals && fraud.signals.gemini && fraud.signals.gemini.recommendation) ? esc(fraud.signals.gemini.recommendation) : '');
       const evidence = Array.isArray(fraud.evidence) ? fraud.evidence : [];
       const evidenceList = evidence.map(function(e) { return '<li>' + esc(typeof e === 'string' ? e : (e.text || e.reason || JSON.stringify(e))) + '</li>'; }).join('');
-      return '<div class="fraud-title">🛡 Fraud / scam</div>' /*+
+      return '<div class="fraud-title">🛡 Fraud / scam</div>' +
         '<div class="fraud-risk ' + riskClass + '">Risk: ' + esc(fraud.risk_level || '—') + ' (' + score + ')</div>' +
         (scamType !== '—' ? '<div style="margin-top:2px">Scam: ' + scamType + '</div>' : '') +
         (summary ? '<div style="margin-top:4px">' + summary + '</div>' : '') +
         (recommendation ? '<div style="margin-top:4px; font-weight:700; color:#1E293B;">💡 Action: ' + recommendation + '</div>' : '') +
-        (evidenceList ? '<ul class="fraud-evidence">' + evidenceList + '</ul>' : '')*/;
+        (evidenceList ? '<ul class="fraud-evidence">' + evidenceList + '</ul>' : '');
     }
 
     function startAudioVisualization(mediaStream) {
